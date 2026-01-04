@@ -11,7 +11,8 @@ from tank import Tank
 from physics import Physics
 from projectile import Projectile, Explosion
 from weapons import get_weapon, get_weapon_count
-from ai import AI
+from ai import AI, RLAgent
+from settings import AIDifficulty
 from ui import UI
 from sound import SoundManager
 
@@ -19,16 +20,26 @@ from sound import SoundManager
 class Game:
     """Main game class managing all game state."""
 
-    def __init__(self, screen):
+    def __init__(self, screen=None, headless=False, fast_mode=False):
         """Initialize the game.
 
         Args:
-            screen: Pygame display surface
+            screen: Pygame display surface (None for headless mode)
+            headless: If True, disable rendering and sound for training
+            fast_mode: If True, skip animations and delays for faster training
         """
         self.screen = screen
+        self.headless = headless
+        self.fast_mode = fast_mode or headless  # Fast mode enabled by default in headless
         self.state = GameState.MENU
-        self.ui = UI()
-        self.sound = SoundManager()
+
+        # Only initialize UI and sound in non-headless mode
+        if not headless:
+            self.ui = UI()
+            self.sound = SoundManager()
+        else:
+            self.ui = None
+            self.sound = None
 
         # Game objects
         self.terrain = None
@@ -41,11 +52,13 @@ class Game:
         # Turn management
         self.current_player_index = 0
         self.turn_transition_timer = 0
-        self.turn_transition_duration = 1.0
+        # No delay in fast mode
+        self.turn_transition_duration = 0.0 if self.fast_mode else 1.0
 
         # Player setup
         self.num_players = 2
         self.player_types = ['human', 'ai']  # 'human' or 'ai'
+        self.ai_difficulties = [AIDifficulty.MEDIUM, AIDifficulty.MEDIUM]  # Per-player AI difficulty
 
         # Input tracking
         self.keys_held = {}
@@ -77,7 +90,8 @@ class Game:
         """Handle input in menu state."""
         if event.key == pygame.K_RETURN or event.key == pygame.K_SPACE:
             self.state = GameState.SETUP
-            self.sound.play('menu_select')
+            if self.sound:
+                self.sound.play('menu_select')
         elif event.key == pygame.K_ESCAPE:
             pygame.event.post(pygame.event.Event(pygame.QUIT))
 
@@ -86,25 +100,26 @@ class Game:
         if event.key == pygame.K_LEFT:
             self.num_players = max(MIN_PLAYERS, self.num_players - 1)
             self._adjust_player_types()
-            self.sound.play('menu_move')
+            if self.sound:
+                self.sound.play('menu_move')
         elif event.key == pygame.K_RIGHT:
             self.num_players = min(MAX_PLAYERS, self.num_players + 1)
             self._adjust_player_types()
-            self.sound.play('menu_move')
+            if self.sound:
+                self.sound.play('menu_move')
         elif event.key in [pygame.K_1, pygame.K_2, pygame.K_3, pygame.K_4]:
-            # Toggle player type
+            # Cycle player type and AI difficulty
             player_idx = event.key - pygame.K_1
             if player_idx < self.num_players:
-                if self.player_types[player_idx] == 'human':
-                    self.player_types[player_idx] = 'ai'
-                else:
-                    self.player_types[player_idx] = 'human'
-                self.sound.play('menu_select')
+                self._cycle_player_type(player_idx)
+                if self.sound:
+                    self.sound.play('menu_select')
         elif event.key == pygame.K_RETURN or event.key == pygame.K_SPACE:
             self._start_game()
         elif event.key == pygame.K_ESCAPE:
             self.state = GameState.MENU
-            self.sound.play('menu_move')
+            if self.sound:
+                self.sound.play('menu_move')
 
     def _handle_aiming_input(self, event):
         """Handle input during aiming phase."""
@@ -130,24 +145,58 @@ class Game:
         """Handle input in game over state."""
         if event.key == pygame.K_RETURN or event.key == pygame.K_SPACE:
             self.state = GameState.MENU
-            self.sound.play('menu_select')
+            if self.sound:
+                self.sound.play('menu_select')
         elif event.key == pygame.K_ESCAPE:
             pygame.event.post(pygame.event.Event(pygame.QUIT))
 
     def _adjust_player_types(self):
-        """Adjust player types list to match player count."""
+        """Adjust player types and AI difficulties lists to match player count."""
         while len(self.player_types) < self.num_players:
             self.player_types.append('ai')
         self.player_types = self.player_types[:self.num_players]
 
+        while len(self.ai_difficulties) < self.num_players:
+            self.ai_difficulties.append(AIDifficulty.MEDIUM)
+        self.ai_difficulties = self.ai_difficulties[:self.num_players]
+
+    def _cycle_player_type(self, player_idx):
+        """Cycle through player types and AI difficulties.
+
+        Cycle order: HUMAN -> AI(EASY) -> AI(MEDIUM) -> AI(HARD) -> AI(RL_PPO) -> AI(RL_DQN) -> HUMAN
+
+        Args:
+            player_idx: Index of player to cycle
+        """
+        if self.player_types[player_idx] == 'human':
+            # Switch to AI with EASY difficulty
+            self.player_types[player_idx] = 'ai'
+            self.ai_difficulties[player_idx] = AIDifficulty.EASY
+        else:
+            # Cycle through AI difficulties, then back to human
+            current = self.ai_difficulties[player_idx]
+            if current == AIDifficulty.EASY:
+                self.ai_difficulties[player_idx] = AIDifficulty.MEDIUM
+            elif current == AIDifficulty.MEDIUM:
+                self.ai_difficulties[player_idx] = AIDifficulty.HARD
+            elif current == AIDifficulty.HARD:
+                self.ai_difficulties[player_idx] = AIDifficulty.RL_PPO
+            elif current == AIDifficulty.RL_PPO:
+                self.ai_difficulties[player_idx] = AIDifficulty.RL_DQN
+            else:  # RL_DQN or unknown
+                # Back to human
+                self.player_types[player_idx] = 'human'
+                self.ai_difficulties[player_idx] = AIDifficulty.MEDIUM
+
     def _start_game(self):
         """Initialize and start a new game."""
         # Play game start sounds
-        self.sound.play('game_start')
-        self.sound.play_battle_music()
+        if self.sound:
+            self.sound.play('game_start')
+            self.sound.play_battle_music()
 
-        # Create terrain
-        self.terrain = Terrain()
+        # Create terrain (headless mode skips visual rendering)
+        self.terrain = Terrain(headless=self.headless)
 
         # Create tanks
         self.tanks = []
@@ -162,13 +211,26 @@ class Game:
             self.tanks.append(tank)
 
             if is_ai:
-                self.ai_controllers[i] = AI(tank)
+                difficulty = self.ai_difficulties[i]
+                if difficulty == AIDifficulty.RL_PPO:
+                    self.ai_controllers[i] = RLAgent(tank, algorithm='ppo', difficulty=AIDifficulty.MEDIUM)
+                elif difficulty == AIDifficulty.RL_DQN:
+                    self.ai_controllers[i] = RLAgent(tank, algorithm='dqn', difficulty=AIDifficulty.MEDIUM)
+                else:
+                    self.ai_controllers[i] = AI(tank, difficulty=difficulty)
 
         # Reset game state
         self.projectiles = []
         self.explosions = []
         self.current_player_index = 0
         self.physics.randomize_wind()
+
+        # Initialize first AI's turn if needed
+        first_tank = self._get_current_tank()
+        if first_tank and first_tank.is_ai:
+            ai = self.ai_controllers.get(first_tank.player_id)
+            if ai:
+                ai.start_turn(self.tanks, self.terrain, self.physics)
 
         self.state = GameState.AIMING
 
@@ -203,7 +265,8 @@ class Game:
         self.projectiles.append(projectile)
 
         # Play fire sound
-        self.sound.play_fire(weapon.name)
+        if self.sound:
+            self.sound.play_fire(weapon.name)
 
         self.state = GameState.FIRING
 
@@ -213,8 +276,9 @@ class Game:
         alive_tanks = [t for t in self.tanks if t.alive]
         if len(alive_tanks) <= 1:
             self.state = GameState.GAME_OVER
-            self.sound.fade_out_music(1500)
-            self.sound.play('victory')
+            if self.sound:
+                self.sound.fade_out_music(1500)
+                self.sound.play('victory')
             return
 
         # Find next alive player
@@ -225,7 +289,8 @@ class Game:
 
         # New wind for new turn
         self.physics.randomize_wind()
-        self.sound.play('wind_change', volume_multiplier=0.5)
+        if self.sound:
+            self.sound.play('wind_change', volume_multiplier=0.5)
 
         # Reset AI controller for new turn
         current_tank = self._get_current_tank()
@@ -237,7 +302,8 @@ class Game:
 
         self.state = GameState.TURN_TRANSITION
         self.turn_transition_timer = 0
-        self.sound.play('turn_change')
+        if self.sound:
+            self.sound.play('turn_change')
 
     def update(self, dt):
         """Update game state.
@@ -246,7 +312,7 @@ class Game:
             dt: Delta time in seconds
         """
         # Handle music for menu states
-        if self.state == GameState.MENU or self.state == GameState.SETUP:
+        if self.sound and (self.state == GameState.MENU or self.state == GameState.SETUP):
             self.sound.play_menu_music()
 
         if self.state == GameState.AIMING:
@@ -298,7 +364,8 @@ class Game:
             # Add any MIRV sub-projectiles
             if sub_projectiles:
                 new_projectiles.extend(sub_projectiles)
-                self.sound.play('mirv_split')
+                if self.sound:
+                    self.sound.play('mirv_split')
 
             if exploded and hit_pos:
                 self._create_explosion(hit_pos[0], hit_pos[1], projectile.weapon)
@@ -321,6 +388,12 @@ class Game:
 
     def _update_explosions(self, dt):
         """Update explosion animations."""
+        if self.fast_mode:
+            # Skip animation, just clear explosions
+            self.explosions = []
+            self._next_turn()
+            return
+
         for explosion in self.explosions:
             explosion.update(dt)
 
@@ -356,7 +429,8 @@ class Game:
         self.explosions.append(explosion)
 
         # Play explosion sound based on size
-        self.sound.play_explosion(weapon.explosion_radius)
+        if self.sound:
+            self.sound.play_explosion(weapon.explosion_radius)
 
         # Handle terrain modification
         if weapon.special == 'add_terrain':
@@ -377,7 +451,7 @@ class Game:
                 was_alive = tank.alive
                 tank.take_damage(damage)
                 # Play tank hit/destroy sound
-                if was_alive:
+                if self.sound and was_alive:
                     self.sound.play_tank_hit(destroyed=not tank.alive)
 
     def render(self, screen):
@@ -386,13 +460,17 @@ class Game:
         Args:
             screen: Pygame display surface
         """
+        # Skip rendering in headless mode
+        if self.headless or screen is None:
+            return
+
         # Draw sky gradient
         self._render_sky(screen)
 
         if self.state == GameState.MENU:
             self.ui.render_menu(screen)
         elif self.state == GameState.SETUP:
-            self.ui.render_setup(screen, self.num_players, self.player_types)
+            self.ui.render_setup(screen, self.num_players, self.player_types, self.ai_difficulties)
         elif self.state == GameState.GAME_OVER:
             # Render game state in background
             self._render_game(screen)

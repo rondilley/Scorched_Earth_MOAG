@@ -12,8 +12,13 @@ from settings import (
 class Terrain:
     """Manages the destructible terrain."""
 
-    def __init__(self):
-        """Initialize terrain."""
+    def __init__(self, headless=False):
+        """Initialize terrain.
+
+        Args:
+            headless: If True, skip visual rendering for faster simulation
+        """
+        self.headless = headless
         self.heights = []  # Height of terrain at each x position
         self.surface = None  # Pre-rendered terrain surface
         self.generate()
@@ -33,8 +38,9 @@ class Terrain:
         # Smooth the terrain slightly
         self._smooth(2)
 
-        # Create the rendered surface
-        self._render_surface()
+        # Create the rendered surface (skip in headless mode)
+        if not self.headless:
+            self._render_surface()
 
     def _midpoint_displacement(self, left, right, roughness):
         """Recursively apply midpoint displacement."""
@@ -143,7 +149,7 @@ class Terrain:
                     self.heights[x] = max(0, int(new_height))
                     modified = True
 
-        if modified:
+        if modified and not self.headless:
             self._render_surface()
 
         return modified
@@ -167,7 +173,8 @@ class Terrain:
             # Clamp height
             self.heights[x] = min(self.heights[x], SCREEN_HEIGHT - 50)
 
-        self._render_surface()
+        if not self.headless:
+            self._render_surface()
 
     def check_collision(self, x, y):
         """Check if a point is inside terrain."""

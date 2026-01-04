@@ -1,2 +1,10 @@
 pygame>=2.0.0
 numpy>=1.20.0
+
+# Training dependencies (optional - only needed for RL training)
+torch>=2.0.0
+tensorboard>=2.13.0
+
+# LLM training data generation (optional)
+anthropic>=0.18.0
+openai>=1.0.0

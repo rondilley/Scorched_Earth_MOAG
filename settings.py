@@ -107,6 +107,8 @@ class AIDifficulty:
     EASY = 'easy'
     MEDIUM = 'medium'
     HARD = 'hard'
+    RL_PPO = 'rl_ppo'    # Trained PPO agent
+    RL_DQN = 'rl_dqn'    # Trained DQN agent
 
 # AI settings
 AI_SETTINGS = {

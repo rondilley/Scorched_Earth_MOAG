@@ -58,13 +58,14 @@ class UI:
                 screen.blit(text, text_rect)
             y += 30
 
-    def render_setup(self, screen, num_players, player_types):
+    def render_setup(self, screen, num_players, player_types, ai_difficulties=None):
         """Render player setup screen.
 
         Args:
             screen: Pygame surface
             num_players: Number of players
             player_types: List of 'human' or 'ai' for each player
+            ai_difficulties: List of AIDifficulty for each player (optional)
         """
         # Title
         title = self.font_large.render("GAME SETUP", True, COLORS['text'])
@@ -81,7 +82,19 @@ class UI:
         y = 260
         for i in range(num_players):
             color = TANK_COLORS[i]
-            type_str = player_types[i].upper()
+
+            # Build display string
+            if player_types[i] == 'human':
+                type_str = "HUMAN"
+            else:
+                # Show AI with difficulty
+                if ai_difficulties and i < len(ai_difficulties):
+                    diff = ai_difficulties[i]
+                    # Get readable difficulty name (diff is a string like 'easy', 'rl_ppo')
+                    diff_name = str(diff).upper().replace('_', ' ')
+                    type_str = f"AI ({diff_name})"
+                else:
+                    type_str = "AI"
 
             # Player indicator
             pygame.draw.rect(screen, color, (SCREEN_WIDTH // 2 - 150, y - 10, 20, 20))
@@ -92,9 +105,9 @@ class UI:
             screen.blit(player_text, (SCREEN_WIDTH // 2 - 120, y - 10))
 
             # Instructions
-            key_text = f"(Press {i + 1} to toggle)"
+            key_text = f"(Press {i + 1} to cycle)"
             key = self.font_small.render(key_text, True, COLORS['menu_text'])
-            screen.blit(key, (SCREEN_WIDTH // 2 + 100, y - 5))
+            screen.blit(key, (SCREEN_WIDTH // 2 + 130, y - 5))
 
             y += 50
 
